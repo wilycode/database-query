@@ -4,38 +4,63 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://github.com/wilycode/database-query/actions/workflows/tests.yml/badge.svg)](https://github.com/wilycode/database-query/actions/workflows/tests.yml)
 
-**A lightweight SQL query builder and canonical parameter representation for PHP 8.4+.** Build and compile SQL without opening a database connection. Drivers handle execution separately.
+**A fluent SQL query builder for PHP 8.4+.** Build `SELECT`, `INSERT`, `UPDATE`, `DELETE`, and `UNION` statements, then compile them into SQL and safely bound values—**without opening a database connection**.
 
-> **WilyCode PHP Ecosystem**
+> [!IMPORTANT]
+> ### WilyCode PHP Ecosystem
+> **WilyCode Database Query** is part of the [**WilyCode PHP Ecosystem**](https://github.com/wilycode/wilycode), a collection of independent, reusable PHP packages. Every package has its own repository, releases, and Composer installation.
 >
-> Part of **[WilyCode](https://github.com/wilycode/wilycode)** — independent, reusable PHP components with their own repositories, versions, and Composer packages.
->
-> **[Explore the WilyCode ecosystem →](https://github.com/wilycode/wilycode)**
+> **[Explore all WilyCode libraries →](https://github.com/wilycode/wilycode)**
 
-## Features
+## Documentation
 
-- `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `UNION`, and raw SQL.
-- Column selection and aliases; `INNER`, `LEFT`, and `RIGHT JOIN`, with optional selected join columns.
-- `WHERE`, nested condition groups, `GROUP BY`, `HAVING`, sorting, and pagination including a separate count query.
-- Subqueries and MySQL-oriented JSON expressions, including correlated JSON arrays.
-- Unique named placeholders, type information, parameter-list expansion, and separate driver binding.
-- No required database connection, PDO, MySQLi, or external runtime libraries.
+This README is organized as a topic-by-topic guide, with **PHP examples followed by the SQL they compile to**. Use the links below to jump to a feature.
 
-## Requirements and installation
+| Getting started | Query building | Advanced topics |
+| --- | --- | --- |
+| [Introduction](#introduction) | [SELECT](#select) | [Raw SQL & parameters](#raw-sql-and-parameters) |
+| [Installation](#installation) | [JOIN](#join) | [UNION](#union) |
+| [Quick start](#quick-start) | [WHERE](#where) | [Subqueries](#subqueries-and-expressions) |
+| [Compiling queries](#compiling-queries) | [GROUP BY & HAVING](#group-by-and-having) | [JSON expressions](#json-expressions) |
+| [API reference](#api-reference) | [ORDER BY & pagination](#order-by-and-pagination) | [Driver integration](#driver-integration) |
+| [Security & limits](#security-and-limitations) | [INSERT / UPDATE / DELETE](#insert-update-and-delete) | [Development](#development) |
 
-PHP **8.4+** with the `ctype` extension.
+## Introduction
+
+`wilycode/database-query` focuses on **building SQL, not executing it**. It provides:
+
+- Fluent builders for `SELECT`, `INSERT`, `UPDATE`, `DELETE`, and `UNION`.
+- Table aliases and selected-column aliases, including columns selected from joins.
+- Conditions, nested `WHERE`/`HAVING` groups, grouping, sorting, and pagination.
+- Subqueries, raw expressions, and MySQL-oriented JSON object/array expressions.
+- Parameter binding with unique named placeholders and optional type metadata.
+- A driver-independent `CompiledQuery` result for separate PDO/MySQLi adapters.
+
+The package does **not** include a database connection, query execution, model hydration, schema migrations, automatic table prefixes, or a universal SQL-dialect compiler.
+
+## Installation
+
+**Requirements:** PHP 8.4 or newer and the `ctype` extension. No third-party runtime packages are required.
 
 ```bash
 composer require wilycode/database-query
 ```
 
-## Quick start
+For a fresh application, include Composer's autoloader before using the library:
 
 ```php
 <?php
 
 require __DIR__ . '/vendor/autoload.php';
 
+use WilyCode\Database\Query\Query;
+```
+
+## Quick start
+
+Build a query, apply conditions and sorting, then call `compile()`:
+
+```php
 use WilyCode\Database\Query\Query;
 
 $query = Query::select('users', 'u')
@@ -48,75 +73,133 @@ $compiled = $query->compile();
 
 echo $compiled->sql;
 print_r($compiled->params);
-print_r($compiled->types);
 ```
 
-`compile()` **does not execute SQL**. It returns a `CompiledQuery` with read-only properties:
+**Compiled SQL**
 
-| Property | Contents |
-| --- | --- |
-| `$compiled->sql` | SQL with named placeholders (for example `:param_1`). |
-| `$compiled->params` | Bound values keyed by placeholders *including* the `:`. |
-| `$compiled->types` | `ParameterType` values for those placeholders. |
+```sql
+SELECT u.id AS `id`, u.email AS `email`
+FROM users AS u
+WHERE u.active = :param_1
+ORDER BY u.id DESC
+LIMIT 10
+```
 
-Recompiling an unchanged builder produces an equivalent result. SQL identifiers and SQL fragments are **not** automatically escaped or validated as trusted application inputs.
-
-## Complete statement API
-
-The following table lists the top-level entry points available through `WilyCode\Database\Query\Query`.
-
-| Entry point | Purpose |
-| --- | --- |
-| `Query::select(string $table = '', ?string $alias = null)` | Build `SELECT` (alias is optional). |
-| `Query::insert(string $table)` | Build `INSERT`. |
-| `Query::update(string $table)` | Build `UPDATE`. |
-| `Query::delete(string $table)` | Build `DELETE`. |
-| `Query::raw(string $sql, array $parameters = [])` | Compile a complete raw statement safely binding values. |
-| `Query::rawExp(string $sql, array $parameters = [])` | Create an expression to embed in a query. |
-| `Query::union(Select ...$selects)` | Combine `SELECT` statements with `UNION` (not `UNION ALL`). |
-
-### SELECT columns and aliases
-
-| Method | Purpose |
-| --- | --- |
-| `column(string $name, ?string $alias = null)` | Add one selected expression/column. |
-| `columns(array $columns)` | Add multiple columns; `resultAlias => expression`, or numeric keys for no result alias. |
-| `columnRaw(string $alias, string $sql, array $parameters = [])` | Add a raw, parameterized expression. |
-| `columnExp(string $alias, Expression $expression)` | Add an `Expression` (e.g. JSON or a subquery) under a result alias. |
+**Bound values**
 
 ```php
-$compiled = Query::select('posts', 'p')
-    ->columns([
-        'id' => 'id',         // p.id AS `id`
-        'title' => 'title',   // p.title AS `title`
-        'authorId' => 'p.user_id',
-        'p.created_at',       // no result alias
-    ])
-    ->columnRaw('titleLength', 'CHAR_LENGTH(p.title)')
-    ->compile();
+[':param_1' => true]
 ```
 
-Simple unqualified column names are automatically qualified with the main table alias (or table name). Explicit qualified names such as `p.user_id` are left unchanged. A numeric array key selects without adding `AS` (for example `['p.*']`). A string array key represents the **result alias**, not a database table prefix.
+> [!NOTE]
+> SQL examples below are formatted for readability. `compile()` usually returns the SQL on a single line. Values stay separate from SQL; placeholders are not replaced with literal values.
 
-### JOINs, aliases, prefixes, and returned columns
+## Compiling queries
 
-| Method | JOIN type | Signature |
+All statement builders expose `compile(): CompiledQuery`.
+
+| Property | Type | Description |
 | --- | --- | --- |
-| `join()` | `INNER JOIN` | `join(string $table, string $alias, string $on, array $parameters = [], array $columns = [])` |
-| `leftJoin()` | `LEFT JOIN` | Same five arguments. |
-| `rightJoin()` | `RIGHT JOIN` | Same five arguments. |
-
-The arguments are, in order: **table name**, **SQL table alias**, **ON condition**, **ON bound values**, and **columns to add to the SELECT list**.
+| `$compiled->sql` | `string` | SQL statement containing named placeholders. |
+| `$compiled->params` | `array` | Bound values, keyed by placeholder names **including `:`**. |
+| `$compiled->types` | `array` | Parameter type information (`ParameterType` enum values). |
 
 ```php
-$compiled = Query::select('posts', 'p')
+$compiled = Query::select('users', 'u')
+    ->where('u.id', 15)
+    ->compile();
+
+// $compiled->sql:   SELECT * FROM users AS u WHERE u.id = :param_1
+// $compiled->params: [':param_1' => 15]
+```
+
+Calling `compile()` again on an unchanged `SELECT` produces an equivalent query without duplicating its parameters. **Compilation does not contact the database.** To execute compiled queries, use a separate driver such as [`wilycode/database-driver-pdo`](https://github.com/wilycode/database-driver-pdo).
+
+---
+
+## SELECT
+
+### Basic SELECT
+
+`Query::select(string $table = '', ?string $alias = null)` starts a query. Pass a short table alias to simplify joins and field references.
+
+```php
+$query = Query::select('posts', 'p')
+    ->columns([
+        'postId' => 'id',
+        'title' => 'title',
+    ]);
+```
+
+**Compiled SQL**
+
+```sql
+SELECT p.id AS `postId`, p.title AS `title`
+FROM posts AS p
+```
+
+If no columns are supplied, the builder uses `SELECT *`.
+
+### Selecting and aliasing columns
+
+| Method | Example | Behavior |
+| --- | --- | --- |
+| `column($name, $alias = null)` | `->column('p.id', 'postId')` | Select one column with an optional result alias. |
+| `columns($columns)` | `->columns(['id' => 'id', 'title' => 'title'])` | Select several columns. Array **keys** are result aliases. |
+| `columnRaw($alias, $sql, $params = [])` | `->columnRaw('length', 'CHAR_LENGTH(p.title)')` | Add a raw SQL expression with an alias. |
+| `columnExp($alias, $expression)` | `->columnExp('profile', JsonObject::of(...))` | Select a typed expression. |
+
+```php
+$query = Query::select('posts', 'p')
+    ->columns([
+        'postId' => 'id',
+        'title' => 'title',
+        'p.created_at', // numeric key: select without AS
+    ])
+    ->columnRaw('titleLength', 'CHAR_LENGTH(p.title)');
+```
+
+**Compiled SQL**
+
+```sql
+SELECT p.id AS `postId`, p.title AS `title`, p.created_at,
+       CHAR_LENGTH(p.title) AS `titleLength`
+FROM posts AS p
+```
+
+Unqualified *simple* column names are qualified using the main table alias (`id` → `p.id`). For `WHERE`, `ORDER BY`, and `GROUP BY`, provide qualified names explicitly when ambiguity is possible. Raw SQL and complex identifiers are the application's responsibility.
+
+---
+
+## JOIN
+
+### INNER, LEFT, and RIGHT JOIN
+
+Available methods: `join()`, `leftJoin()`, and `rightJoin()`.
+
+They share the same signature:
+
+```php
+public function leftJoin(
+    string $table,
+    string $alias,
+    string $on,
+    array $parameters = [],
+    array $columns = [],
+): self
+```
+
+The **fifth argument** is important: it selects extra columns from the joined table, without having to add them separately to `columns()`.
+
+```php
+$query = Query::select('posts', 'p')
     ->columns(['postId' => 'id', 'title' => 'title'])
     ->leftJoin(
         'users',
         'u',
-        'u.id = p.user_id AND u.active = ?',
-        [true],
-        ['authorId' => 'id', 'authorName' => 'name'],
+        'u.id = p.user_id',
+        [],
+        ['authorName' => 'name'],
     )
     ->leftJoin(
         'categories',
@@ -124,152 +207,383 @@ $compiled = Query::select('posts', 'p')
         'c.id = p.category_id',
         [],
         ['categoryName' => 'name'],
-    )
-    ->where('p.published', true)
-    ->compile();
-
-// SELECT p.id AS `postId`, p.title AS `title`,
-//        u.id AS `authorId`, u.name AS `authorName`,
-//        c.name AS `categoryName` FROM posts AS p
-// LEFT JOIN users AS u ON ... LEFT JOIN categories AS c ON ...
+    );
 ```
 
-**Distinguish these different meanings of “prefix”:**
+**Compiled SQL**
 
-- **Table alias / column qualifier:** `Query::select('posts', 'p')`, `leftJoin('users', 'u', ...)`. A joined column `'name'` is rendered as `u.name`; a normal selected column `'title'` as `p.title`. In `where()`, `orderBy()`, and `groupBy()` **write qualified names yourself**, e.g. `p.id` or `u.name`.
-- **Result field alias:** `['authorName' => 'name']` creates the SQL result field `u.name AS authorName` (with MySQL-style quoting around the alias) for joined columns, not a nested `author` object. Result rows are flat.
-- **Physical table prefix:** there is **no** `prefix()`, `tablePrefix()`, or automatic prefix setting. Specify actual table names, e.g. `Query::select('app_posts', 'p')->leftJoin('app_users', 'u', 'u.id = p.user_id')`.
-- **Bound-parameter prefix:** `JsonArraySubquery::paramPrefix('comments')` affects placeholder names such as `:comments_param_1` — **not** table names or result fields. See JSON examples below.
+```sql
+SELECT p.id AS `postId`, p.title AS `title`,
+       u.name AS `authorName`, c.name AS `categoryName`
+FROM posts AS p
+LEFT JOIN users AS u ON u.id = p.user_id
+LEFT JOIN categories AS c ON c.id = p.category_id
+```
 
-For a JOIN column list, `['authorName' => 'name']` qualifies a simple name with the JOIN alias; `['u.id']` keeps an explicit qualifier; `['*']` selects the joined table's `u.*`. An empty array or omitted fifth argument adds **no** joined columns. The SQL `ON` expression is raw SQL: supply values through `?` or `:name` placeholders, never concatenate untrusted values.
+### JOIN columns and aliases
 
-The builder supports `INNER`, `LEFT`, and `RIGHT` joins; it does **not** provide dedicated `crossJoin()` or `fullJoin()` methods.
+A joined column name such as `'name'` is automatically qualified using the joined table's alias (`u.name`, `c.name`).
 
-### WHERE filters and groups
-
-`Select`, `Update`, and `Delete` support the following methods:
-
-| Method | Purpose |
+| Fifth argument (`$columns`) | SQL selection |
 | --- | --- |
-| `where($column, $value, $operator = '=', $logical = 'AND')` | Add a comparison. |
-| `andWhere($column, $value, $operator = '=')` | Add an `AND` comparison. |
-| `orWhere($column, $value, $operator = '=')` | Add an `OR` comparison. |
-| `whereColumn($left, $right, $operator = '=', $logical = 'AND')` | Compare two SQL columns, without a bound value. |
-| `whereExp(Expression $expression, $logical = 'AND')` | Add an expression. |
-| `whereRaw($sql, $parameters = [], $logical = 'AND')` | Add raw SQL with value placeholders. |
-| `andWhereRaw($sql, $parameters = [])` / `orWhereRaw(...)` | Add parameterized raw SQL with a chosen conjunction. |
-| `whereGroup(callable $callback, $logical = 'AND')` | Add a parenthesized condition group. |
-| `andWhereGroup($callback)` / `orWhereGroup($callback)` | Explicit grouping with `AND` or `OR`. |
+| `['authorName' => 'name']` | `u.name AS \`authorName\`` |
+| `['authorId' => 'id']` | `u.id AS \`authorId\`` |
+| `['u.id']` | `u.id` (no result alias) |
+| `['*']` | `u.*` |
+| `[]` | No additional selected columns |
 
-Supported comparison operators: `=`, `<>` (also `!=`), `>`, `<`, `>=`, `<=`, `LIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, and `IS NOT` (strings or `ComparisonOperator` enum cases).
+The returned row is **flat** (for example, `['authorName' => 'Alice']`), not a nested `author` object.
+
+### JOIN with conditions and bound values
+
+Use `?` or named placeholders in the `ON` condition, and pass values as the fourth argument:
 
 ```php
-$compiled = Query::select('users', 'u')
+$query = Query::select('posts', 'p')
+    ->leftJoin(
+        'users',
+        'u',
+        'u.id = p.user_id AND u.active = ?',
+        [true],
+        ['authorName' => 'name'],
+    );
+```
+
+**Compiled SQL**
+
+```sql
+SELECT u.name AS `authorName`
+FROM posts AS p
+LEFT JOIN users AS u ON u.id = p.user_id AND u.active = :param_1
+```
+
+```php
+// $compiled->params === [':param_1' => true]
+```
+
+### What about prefixes?
+
+Three different concepts must not be confused:
+
+- **Table alias:** `'users', 'u'` means `users AS u` and enables `u.name`.
+- **Result alias:** `['authorName' => 'name']` means `u.name AS \`authorName\``.
+- **Table name prefix:** not managed by this package; if your physical table is `app_users`, pass `'app_users'` explicitly.
+
+There is **no sixth `$prefix` argument**, no automatic `categoryName` generator, and no implicit mapping from `category.name` to an object. For nested data, see [JSON expressions](#json-expressions).
+
+> [!NOTE]
+> The builder provides `INNER`, `LEFT`, and `RIGHT JOIN` methods. It has no dedicated `FULL JOIN`, `CROSS JOIN`, or arbitrary JOIN-builder callback API.
+
+---
+
+## WHERE
+
+### Basic comparisons
+
+`where()` has the signature `where($column, $value, $operator = '=', $logical = 'AND')`. Use `andWhere()` and `orWhere()` for clearer intent.
+
+```php
+$query = Query::select('users', 'u')
     ->where('u.active', true)
-    ->whereGroup(fn ($group) => $group
-        ->where('u.role', 'admin')
-        ->orWhere('u.role', 'editor'))
-    ->andWhere('u.id', [5, 8, 13], 'IN')
-    ->whereColumn('u.manager_id', 'u.id', '<>')
-    ->where('u.deleted_at', null) // IS NULL
-    ->compile();
+    ->andWhere('u.age', 18, '>=')
+    ->orWhere('u.role', 'admin');
 ```
 
-`where('x', null)` becomes `x IS NULL`; `where('x', null, '<>')` becomes `x IS NOT NULL`. For builder comparisons, empty `IN` arrays compile to a false condition (`0=1`), and empty `NOT IN` arrays to a true condition (`1=1`). Array values are only accepted with `IN`/`NOT IN`.
+**Compiled SQL**
 
-### GROUP BY and HAVING
+```sql
+SELECT * FROM users AS u
+WHERE u.active = :param_1 AND u.age >= :param_2 OR u.role = :param_3
+```
 
-`Select` supports `groupBy(string|array ...$columns)`, plus:
+Be mindful of SQL's `AND`/`OR` precedence. Use condition groups when you need explicit parentheses.
 
-| Method | Purpose |
-| --- | --- |
-| `having($column, $value, $operator = '=', $logical = 'AND')` | Add an aggregate/result filter. |
-| `andHaving(...)` / `orHaving(...)` | Explicit conjunctions. |
-| `havingExp(Expression $expression, $logical = 'AND')` | Expression in `HAVING`. |
-| `havingRaw($sql, $parameters = [], $logical = 'AND')` | Raw SQL with bound values. |
-| `andHavingRaw(...)` / `orHavingRaw(...)` | Raw filter with chosen conjunction. |
-| `havingGroup($callback, $logical = 'AND')` | Parenthesized group. |
-| `andHavingGroup($callback)` / `orHavingGroup($callback)` | Group with chosen conjunction. |
+Supported operators: `=`, `<>` (or `!=`), `>`, `<`, `>=`, `<=`, `LIKE`, `NOT LIKE`, `IN`, `NOT IN`, `IS`, `IS NOT`.
+
+### Nested WHERE groups
 
 ```php
-$compiled = Query::select('orders', 'o')
-    ->columns(['customerId' => 'customer_id'])
+$query = Query::select('posts', 'p')
+    ->where('p.published', true)
+    ->whereGroup(fn ($group) => $group
+        ->where('p.role', 'admin')
+        ->orWhere('p.role', 'editor'));
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM posts AS p
+WHERE p.published = :param_1
+  AND (p.role = :param_2 OR p.role = :param_3)
+```
+
+You can also use `andWhereGroup()` and `orWhereGroup()`.
+
+### NULL and IN conditions
+
+```php
+$query = Query::select('users', 'u')
+    ->where('u.deleted_at', null)
+    ->where('u.id', [1, 3, 8], 'IN');
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM users AS u
+WHERE u.deleted_at IS NULL
+  AND u.id IN (:param_1, :param_2, :param_3)
+```
+
+- `where('column', null)` generates `IS NULL`.
+- `where('column', null, '<>')` generates `IS NOT NULL`.
+- Array values are supported only with `IN` and `NOT IN` in builder conditions.
+- Empty `IN` lists compile to an always-false condition; empty `NOT IN` lists to an always-true condition.
+
+### Comparing columns
+
+`whereColumn()` compares two **SQL identifiers**, not a column and a bound value.
+
+```php
+$query = Query::select('users', 'u')
+    ->whereColumn('u.manager_id', 'u.id', '<>');
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM users AS u WHERE u.manager_id <> u.id
+```
+
+### Raw WHERE expressions
+
+Use raw fragments for conditions outside the fluent API. Bind *values* rather than concatenating them:
+
+```php
+$query = Query::select('users', 'u')
+    ->whereRaw('LOWER(u.email) LIKE ?', ['%@example.test']);
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM users AS u WHERE LOWER(u.email) LIKE :param_1
+```
+
+`whereExp()`, `whereRaw()`, `andWhereRaw()`, and `orWhereRaw()` are also available for custom expressions and combinations.
+
+---
+
+## GROUP BY and HAVING
+
+`groupBy()` accepts one or multiple columns (including arrays). `having()` works like `where()`, but applies an aggregate/result filter.
+
+```php
+$query = Query::select('orders', 'o')
+    ->column('o.customer_id', 'customerId')
     ->columnRaw('total', 'SUM(o.amount)')
     ->groupBy('o.customer_id')
-    ->having('total', 100, '>=')
-    ->orHavingRaw('COUNT(*) > ?', [10])
-    ->compile();
+    ->having('total', 100, '>=');
 ```
 
-### Sorting and pagination
+**Compiled SQL**
 
-`Select` and `Union` support:
+```sql
+SELECT o.customer_id AS `customerId`, SUM(o.amount) AS `total`
+FROM orders AS o
+GROUP BY o.customer_id
+HAVING total >= :param_1
+```
 
-| Method | Effect |
-| --- | --- |
-| `orderBy(string $column, string|OrderDirection $direction = 'ASC')` | Adds an `ORDER BY` item; can be called more than once. |
-| `limit(int $limit)` | Maximum rows; cannot be negative. |
-| `offset(int $offset)` | Skip rows; cannot be negative. |
-| `pagination(int $page, int $perPage)` | Sets `LIMIT` and `OFFSET` for a 1-based page number. |
+Available HAVING operations: `having()`, `andHaving()`, `orHaving()`, `havingExp()`, `havingRaw()`, `andHavingRaw()`, `orHavingRaw()`, `havingGroup()`, `andHavingGroup()`, and `orHavingGroup()`.
+
+```php
+$query->orHavingRaw('COUNT(*) > ?', [10]);
+```
+
+Use grouped HAVING conditions when `AND` and `OR` must have explicit precedence.
+
+---
+
+## ORDER BY and pagination
+
+### Sorting results
+
+```php
+$query = Query::select('posts', 'p')
+    ->orderBy('p.created_at', 'DESC')
+    ->orderBy('p.id', 'ASC');
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM posts AS p ORDER BY p.created_at DESC, p.id ASC
+```
+
+`orderBy()` accepts `ASC`, `DESC`, or an `OrderDirection` enum case.
+
+### LIMIT, OFFSET, and pages
 
 ```php
 $query = Query::select('posts', 'p')
     ->where('p.published', true)
     ->orderBy('p.created_at', 'DESC')
-    ->orderBy('p.id', 'ASC')
-    ->pagination(2, 20);
-
-$page = $query->compile(); // LIMIT 20 OFFSET 20
-$count = $query->forPaginationCount(); // Count without ORDER BY and pagination
+    ->pagination(page: 2, perPage: 20);
 ```
 
-`Select::forPaginationCount(string $countAlias = 'total')` returns a separate `CompiledQuery` counting the selected result. It uses a derived table, so grouping and `HAVING` still count result rows correctly. The count alias must be a simple SQL identifier.
+**Compiled SQL**
 
-### INSERT, UPDATE, and DELETE
+```sql
+SELECT * FROM posts AS p
+WHERE p.published = :param_1
+ORDER BY p.created_at DESC
+LIMIT 20 OFFSET 20
+```
+
+Alternatively use `limit(20)->offset(20)`. Page numbers in `pagination()` are **1-based**; negative limits/offsets and invalid pages are rejected.
+
+### Counting all matching rows
+
+Use `forPaginationCount()` on a `Select` builder:
 
 ```php
-$insert = Query::insert('users')
-    ->values(['email' => 'hello@example.test', 'active' => true])
-    ->compile();
+$page = $query->compile();
+$count = $query->forPaginationCount();
+```
 
-$insertMany = Query::insert('users')->valuesMany([
+**Count SQL**
+
+```sql
+SELECT COUNT(*) AS total
+FROM (
+    SELECT * FROM posts AS p WHERE p.published = :param_1
+) AS _count
+```
+
+The count query ignores `ORDER BY`, `LIMIT`, and `OFFSET`. It preserves the query's filtering and handles `GROUP BY`/`HAVING` by counting rows in the derived query. You may specify a safe result alias: `forPaginationCount('matchingRows')`.
+
+---
+
+## INSERT, UPDATE, and DELETE
+
+### INSERT one row
+
+```php
+$query = Query::insert('users')
+    ->values(['email' => 'hello@example.test', 'active' => true]);
+```
+
+**Compiled SQL**
+
+```sql
+INSERT INTO users (email, active) VALUES (:param_1, :param_2)
+```
+
+### INSERT multiple rows
+
+```php
+$query = Query::insert('users')->valuesMany([
     ['email' => 'alice@example.test', 'active' => true],
     ['email' => 'bob@example.test', 'active' => false],
-])->compile();
-
-$update = Query::update('users')
-    ->set(['active' => false])
-    ->where('id', 15)
-    ->compile();
-
-$delete = Query::delete('users')->where('id', 15)->compile();
+]);
 ```
 
-`Insert::values(array $row)` inserts one row; `valuesMany(array $rows)` inserts multiple rows, with **identical column names in identical order**. `Update::set(array $values)` adds assignments; repeat assignments for a column are rejected. `Update` and `Delete` inherit all the `WHERE` methods described above. **They do not automatically require a `WHERE` clause**: always add one when needed to avoid modifying an entire table.
+**Compiled SQL**
 
-### Raw SQL and parameter binding
+```sql
+INSERT INTO users (email, active)
+VALUES (:param_1, :param_2), (:param_3, :param_4)
+```
+
+All rows must supply **exactly the same columns in the same order**.
+
+### UPDATE
 
 ```php
-$compiled = Query::raw(
-    'SELECT * FROM users WHERE id IN (:ids) AND status = :status',
-    ['ids' => [10, 20, 30], 'status' => 'active'],
-)->compile();
-
-$other = Query::select('users', 'u')
-    ->whereRaw('u.age > ? AND u.email LIKE ?', [18, '%@example.test'])
-    ->columnRaw('fullName', 'CONCAT(u.first_name, ?, u.last_name)', [' '])
-    ->compile();
+$query = Query::update('users')
+    ->set(['active' => false])
+    ->where('id', 15);
 ```
 
-Both positional `?` and named `:name` value placeholders are accepted in raw expressions. The compiler produces unique canonical named placeholders; repeated named occurrences are safely rewritten. Arrays are expanded only when the placeholder is enclosed in parentheses (for example `IN (:ids)` or `IN (?)`); an empty array uses an empty-result subquery rather than `IN ()`. Missing, unused, or conflicting parameters are rejected. Placeholder-like text inside SQL strings and comments is ignored.
+**Compiled SQL**
 
-The public `ParameterBag` supports `add($value, ?string $name = null, ?ParameterType $type = null)`, `addAuto($value, string $prefix = 'param', ?ParameterType $type = null)`, `addList(array $values, string $prefix = 'param', ?ParameterType $type = null)`, `getParameters()`, `getTypes()`, and `has($name)`. These are lower-level primitives, not a setting for table prefixes.
+```sql
+UPDATE users SET active = :param_1 WHERE id = :param_2
+```
 
-Parameter types are represented by `ParameterType`: `STRING`, `INTEGER`, `BOOLEAN`, `NULL`, `LOB`, `FLOAT`, `DATE`, and `DATETIME`. `ParameterType::fromPhpType()` infers types from PHP values. `DateTimeInterface` values and backed enums are normalized when bound.
+### DELETE
 
-Other public enums used by the API are `OrderDirection` (`ASC`, `DESC`), `ComparisonOperator` (the operators listed above), `LogicalOperator` (`AND`, `OR`, `EMPTY`), and `JoinType` (`INNER`, `LEFT`, `RIGHT`). The enum conversion helpers `fromString()` validate supported string inputs. `ParameterProcessor::process()` is a lower-level parser for SQL placeholders; most applications should use `Query::raw()`, `whereRaw()`, or `columnRaw()` instead.
+```php
+$query = Query::delete('users')
+    ->where('id', 15);
+```
 
-### UNION
+**Compiled SQL**
+
+```sql
+DELETE FROM users WHERE id = :param_1
+```
+
+> [!WARNING]
+> `UPDATE` and `DELETE` **do not require a WHERE clause**. Omitting it can affect every row in the table. Add your intended filters before executing the statement.
+
+---
+
+## Raw SQL and parameters
+
+### Compiling raw SQL
+
+You can compile a complete SQL statement without using the fluent builder:
+
+```php
+$query = Query::raw(
+    'SELECT * FROM users WHERE id IN (:ids) AND status = :status',
+    ['ids' => [2, 5, 8], 'status' => 'active'],
+);
+
+$compiled = $query->compile();
+```
+
+**Compiled SQL**
+
+```sql
+SELECT * FROM users
+WHERE id IN (:ids_param_1, :ids_param_2, :ids_param_3)
+  AND status = :status
+```
+
+**Bound values**
+
+```php
+[
+    ':ids_param_1' => 2,
+    ':ids_param_2' => 5,
+    ':ids_param_3' => 8,
+    ':status' => 'active',
+]
+```
+
+Raw SQL accepts positional `?` and named `:name` bindings. Repeated named placeholders are canonicalized; SQL strings and comments are respected by the placeholder scanner. Arrays can expand only when their placeholder is inside parentheses (such as `IN (:ids)` or `IN (?)`). Empty arrays compile to an empty-result subquery rather than `IN ()`.
+
+### Query parameters and types
+
+`CompiledQuery` contains three separate pieces of data: `sql`, `params`, and `types`. Parameters are **not interpolated into the SQL string**.
+
+The `ParameterType` enum supports: `STRING`, `INTEGER`, `BOOLEAN`, `NULL`, `LOB`, `FLOAT`, `DATE`, and `DATETIME`. Its `fromPhpType()` helper infers types from PHP values; `DateTimeInterface` and backed enums are normalized by parameter handling.
+
+For lower-level code, `ParameterBag` exposes `add()`, `addAuto()`, `addList()`, `getParameters()`, `getTypes()`, and `has()`. Most applications should use the fluent builders rather than construct parameter bags directly.
+
+### SQL injection safety
+
+Use **bound parameters for untrusted values**. The builder does *not* bind table names, column identifiers, aliases, order expressions, or arbitrary SQL fragments. **Allow-list those inputs in your application**; never concatenate unchecked user input into `columnRaw()`, `whereRaw()`, `orderBy()`, or `JOIN ... ON`.
+
+---
+
+## UNION
+
+Combine multiple SELECT statements into one `UNION` query:
 
 ```php
 $customers = Query::select('customers', 'c')
@@ -280,59 +594,104 @@ $staff = Query::select('staff', 's')
     ->column('s.id', 'id')
     ->where('s.active', true);
 
-$compiled = Query::union($customers, $staff)
+$query = Query::union($customers, $staff)
     ->orderBy('id')
-    ->pagination(1, 20)
-    ->compile();
+    ->limit(20);
 ```
 
-`Query::union(Select ...$selects)` creates a `Union`; `Union::add(QueryInterface $query)` appends another branch. Each branch is parenthesized and its parameter names are kept collision-free. `Union` also provides `orderBy()`, `limit()`, `offset()`, `pagination()`, and `compile()`. The implementation generates **`UNION` only**; it has no dedicated `unionAll()`.
+**Compiled SQL**
 
-### Subqueries and expressions
+```sql
+(SELECT c.id AS `id` FROM customers AS c WHERE c.active = :union_1_param_1)
+UNION
+(SELECT s.id AS `id` FROM staff AS s WHERE s.active = :union_2_param_1)
+ORDER BY id ASC
+LIMIT 20
+```
 
-Use `Subquery` where an `Expression` is accepted; values are imported into the outer parameter bag without collisions.
+Each branch receives collision-free parameter names. You may add branches with `Union::add()` and call `orderBy()`, `limit()`, `offset()`, or `pagination()` on the union.
+
+> [!NOTE]
+> `UNION` is available; a dedicated `unionAll()`, `EXCEPT`, or `INTERSECT` builder is **not** part of the current API.
+
+---
+
+## Subqueries and expressions
+
+`Subquery` embeds a separately built query inside a selected expression. It imports the subquery parameters into the outer query without name collisions.
 
 ```php
 use WilyCode\Database\Query\Expression\Subquery;
-use WilyCode\Database\Query\Expression\ValueExpression;
 
-$sub = Query::select('orders', 'o')
-    ->columnRaw('count', 'COUNT(*)')
-    ->where('o.user_id', 10);
+$orders = Query::select('orders', 'o')
+    ->columnRaw('cnt', 'COUNT(*)')
+    ->whereRaw('o.user_id = u.id');
 
-$compiled = Query::select('users', 'u')
-    ->columnExp('ordersCount', new Subquery($sub))
-    ->columnExp('label', ValueExpression::of('example'))
-    ->compile();
+$query = Query::select('users', 'u')
+    ->column('u.id', 'id')
+    ->columnExp('orderCount', new Subquery($orders));
 ```
 
-`ValueExpression::of($value)` binds a literal; `RawExpression::raw($sql, $params)` and `Query::rawExp(...)` create custom SQL expressions. `Expression` defines `compile(ParameterBag $bag): string` for advanced extensions.
+**Compiled SQL**
 
-### JSON columns and nested objects
+```sql
+SELECT u.id AS `id`,
+       (SELECT COUNT(*) AS `cnt` FROM orders AS o WHERE o.user_id = u.id)
+       AS `orderCount`
+FROM users AS u
+```
 
-The library provides MySQL-oriented expressions: `JsonObject::of(array $fields, ?string $nullGuardColumn = null)`, `JsonArray::of(array $items)`, and `JsonArraySubquery::of(Select $query, string|Expression $item, bool $coalesceEmptyArray = true, bool $distinct = false, bool $includeGroupBy = false, bool $includeHaving = false)`.
+Other expression classes include:
+
+| Expression | Purpose |
+| --- | --- |
+| `RawExpression::raw($sql, $params)` / `Query::rawExp(...)` | Arbitrary SQL fragment with bound values. |
+| `ValueExpression::of($value)` | A **bound literal** value. |
+| `Subquery` | Nested query expression. |
+| `JsonObject`, `JsonArray`, `JsonArraySubquery` | MySQL-oriented JSON structures. |
+
+The `Expression` interface exposes `compile(ParameterBag $bag): string` for advanced custom expressions.
+
+---
+
+## JSON expressions
+
+MySQL-oriented JSON expressions are useful when your application needs a **structured value** rather than many flat columns from a JOIN.
+
+### JSON objects (including optional LEFT JOIN relations)
 
 ```php
-use WilyCode\Database\Query\Expression\JsonArray;
 use WilyCode\Database\Query\Expression\JsonObject;
-use WilyCode\Database\Query\Expression\ValueExpression;
 
-$compiled = Query::select('users', 'u')
-    ->column('u.id', 'id')
-    ->columnExp('profile', JsonObject::of([
-        'id' => 'u.id',                 // SQL column, not a string literal
-        'name' => 'u.name',
-        'label' => ValueExpression::of('member'), // a bound literal string
-        'flags' => JsonArray::of([true, 42]),
-    ]))
-    ->compile();
+$query = Query::select('posts', 'p')
+    ->column('p.id', 'id')
+    ->leftJoin('categories', 'c', 'c.id = p.category_id')
+    ->columnExp('category', JsonObject::of([
+        'id' => 'c.id',
+        'name' => 'c.name',
+    ], 'c.id'));
 ```
 
-**Important:** bare strings inside `JsonObject` / `JsonArray` are treated as *SQL fragments or column references*. Use `ValueExpression::of('literal string')` when binding text values.
+**Compiled SQL**
 
-For an optional `LEFT JOIN` relation, `JsonObject::of($fields, 'u.id')` emits `NULL` when `u.id IS NULL`, avoiding an object whose fields are all null.
+```sql
+SELECT p.id AS `id`,
+       IF(c.id IS NULL, NULL, JSON_OBJECT('id', c.id, 'name', c.name))
+       AS `category`
+FROM posts AS p
+LEFT JOIN categories AS c ON c.id = p.category_id
+```
 
-#### Correlated JSON arrays and parameter prefixes
+The second argument to `JsonObject::of()` is an optional **null guard**. It prevents a missing LEFT JOIN row from becoming a JSON object full of `null` fields.
+
+> [!IMPORTANT]
+> Strings used as expression values (such as `'c.name'`) are treated as **SQL expressions/columns**, not text literals. Use `ValueExpression::of('literal text')` for a bound string value.
+
+### JSON arrays
+
+`JsonArray::of([...])` builds a JSON array expression. For example, you can include it as a field inside `JsonObject::of()` to produce structured JSON with nested values.
+
+### Correlated JSON arrays
 
 ```php
 use WilyCode\Database\Query\Expression\JsonArraySubquery;
@@ -342,55 +701,97 @@ $comments = Query::select('comments', 'c')
     ->whereRaw('c.post_id = p.id')
     ->where('c.approved', true);
 
-$commentItems = JsonArraySubquery::of(
-    $comments,
-    JsonObject::of(['id' => 'c.id', 'body' => 'c.body']),
-)->paramPrefix('comments');
-
-$compiled = Query::select('posts', 'p')
+$query = Query::select('posts', 'p')
     ->column('p.id', 'id')
-    ->columnExp('comments', $commentItems)
-    ->compile();
+    ->columnExp('comments', JsonArraySubquery::of(
+        $comments,
+        JsonObject::of(['id' => 'c.id', 'body' => 'c.body']),
+    ));
 ```
 
-`paramPrefix('comments')` prefixes imported **placeholders**, e.g. `:comments_param_1`, to avoid collisions. If a `JsonArraySubquery` is passed directly to `columnExp('comments', ...)` and has no explicitly configured prefix, the column alias `comments` is automatically used as its parameter prefix. `paramPrefix(null)` resets it. This **does not set the SQL table prefix**.
+**Compiled SQL**
 
-`JsonArraySubquery` creates a JSON array using `JSON_ARRAYAGG`. `coalesceEmptyArray` emits an empty JSON array instead of `NULL` when no rows match; `distinct` adds `DISTINCT`; `includeGroupBy` / `includeHaving` control whether clauses from its source `Select` are included. This expression is intended for MySQL 8+ / compatible MariaDB installations; check SQL support and syntax in your database version.
-
-### Binding to a driver
-
-`CompiledQuery` is a driver-neutral intermediate representation. A driver-specific `BinderInterface` converts it into `BoundQuery` (`sql`, `params`, `types`); another package is responsible for execution.
-
-```php
-use WilyCode\Database\Query\Binding\BinderInterface;
-use WilyCode\Database\Query\CompiledQuery;
-
-function prepareForDriver(BinderInterface $binder, CompiledQuery $query): void
-{
-    $bound = $binder->bind($query);
-    // $bound->sql, $bound->params, $bound->types
-    // Pass this result to your concrete driver.
-}
+```sql
+SELECT p.id AS `id`,
+       (SELECT COALESCE(
+           JSON_ARRAYAGG(JSON_OBJECT('id', c.id, 'body', c.body)),
+           JSON_ARRAY()
+       ) FROM comments AS c
+       WHERE c.post_id = p.id AND c.approved = :comments_param_1)
+       AS `comments`
+FROM posts AS p
 ```
 
-## Important limitations and security
+`JsonArraySubquery::of()` supports options for empty-array coalescing, `DISTINCT`, `GROUP BY`, and `HAVING` inclusion. It also supports `->paramPrefix('comments')` to namespace **bound parameter names**; if no prefix is set, `columnExp('comments', ...)` automatically uses the result alias as its prefix. This is *not* a table/column prefix.
 
-- This package **compiles SQL but does not connect to or query a database**.
-- A physical table prefix is not configured automatically; pass exact table names to the builder.
-- JOIN result columns are **flat**, not automatically nested objects. JSON expressions are available for explicit structured results.
-- Table names, column identifiers, sorting expressions, and raw SQL are not value-bound. **Never interpolate untrusted identifiers or SQL fragments**; allow-list or validate them in the calling application.
-- The generated SQL includes MySQL-oriented quoting and JSON functions and is **not guaranteed portable** across every SQL dialect.
-- `UPDATE` and `DELETE` can compile without a `WHERE` clause.
+Check generated JSON SQL against your MySQL/MariaDB version. This package does **not** provide separate dialect compilers for PostgreSQL, SQLite, SQL Server, or Oracle.
 
-## Related packages
+---
+
+## Driver integration
+
+WilyCode Database Query creates a **driver-neutral intermediate query**, while separate packages handle connections and execution.
+
+```text
+Query builder
+    ↓ compile()
+CompiledQuery { sql, params, types }
+    ↓ driver-specific BinderInterface::bind()
+BoundQuery { sql, params, types }
+    ↓ separate database driver
+Database execution
+```
+
+`BinderInterface` and `BoundQuery` are included in this package. PDO and MySQLi adapters live in separate repositories.
 
 | Package | Purpose |
 | --- | --- |
-| [wilycode/database-driver](https://github.com/wilycode/database-driver) | Database connection, query, and transaction contracts. |
-| [wilycode/database-driver-pdo](https://github.com/wilycode/database-driver-pdo) | PDO adapter and canonical query binder. |
-| [wilycode/database-driver-mysqli](https://github.com/wilycode/database-driver-mysqli) | MySQLi adapter and binder. |
+| [wilycode/database-driver](https://github.com/wilycode/database-driver) | Database connection and transaction contracts. |
+| [wilycode/database-driver-pdo](https://github.com/wilycode/database-driver-pdo) | PDO database implementation and query binder. |
+| [wilycode/database-driver-mysqli](https://github.com/wilycode/database-driver-mysqli) | MySQLi implementation and query binder. |
+| [wilycode/database-model](https://github.com/wilycode/database-model) | Models and relationship hydration. |
 
-These are **separate packages**, not runtime dependencies of the query builder.
+These libraries are **not required** to install or use the query builder itself. `compile()` does not run SQL, fetch records, or hydrate models.
+
+## API reference
+
+### Statement factories
+
+| Factory | Returns | Description |
+| --- | --- | --- |
+| `Query::select($table = '', $alias = null)` | `Select` | Build a SELECT statement. |
+| `Query::insert($table)` | `Insert` | Build an INSERT statement. |
+| `Query::update($table)` | `Update` | Build an UPDATE statement. |
+| `Query::delete($table)` | `Delete` | Build a DELETE statement. |
+| `Query::union(Select ...$queries)` | `Union` | Combine SELECT statements. |
+| `Query::raw($sql, $parameters = [])` | `RawQuery` | Compile a complete raw query. |
+| `Query::rawExp($sql, $parameters = [])` | `RawExpression` | Create a SQL expression. |
+
+### Common builder methods
+
+| Builder | Methods |
+| --- | --- |
+| `Select` | `column`, `columns`, `columnRaw`, `columnExp`, `join`, `leftJoin`, `rightJoin`, `where`, `whereColumn`, `whereRaw`, `whereExp`, `whereGroup`, `groupBy`, `having`, `havingRaw`, `havingExp`, `havingGroup`, `orderBy`, `limit`, `offset`, `pagination`, `forPaginationCount`, `compile` |
+| `Insert` | `values`, `valuesMany`, `compile` |
+| `Update` | `set`, `where` and shared WHERE variants, `compile` |
+| `Delete` | `where` and shared WHERE variants, `compile` |
+| `Union` | `add`, `orderBy`, `limit`, `offset`, `pagination`, `compile` |
+| Shared WHERE variants | `andWhere`, `orWhere`, `andWhereRaw`, `orWhereRaw`, `andWhereGroup`, `orWhereGroup` |
+| Shared HAVING variants | `andHaving`, `orHaving`, `andHavingRaw`, `orHavingRaw`, `andHavingGroup`, `orHavingGroup` |
+
+Supported enum families: `ComparisonOperator`, `LogicalOperator`, `OrderDirection`, `JoinType`, and `ParameterType`.
+
+## Security and limitations
+
+- **Trusted identifiers only.** Parameter binding protects values, **not** SQL identifiers or arbitrary fragments.
+- **SQL dialect:** identifiers, JSON functions, and some compiled fragments use MySQL-oriented conventions. Test SQL on your actual database engine.
+- **No execution:** there is no connection, fetch, logging, or ORM layer in this package.
+- **No automatic table prefix:** supply physical table names directly (e.g. `app_posts`).
+- **No automatic JOIN result prefix:** select explicit aliases such as `['categoryName' => 'name']`.
+- **No implicit nested relation hydration:** joined columns produce flat rows; JSON expressions can explicitly produce structured data for a separate model layer.
+- **No CTE, `UNION ALL`, `EXCEPT`, `INTERSECT`, or dedicated `FULL JOIN` API** in this version.
+- **Potentially destructive queries:** `UPDATE` and `DELETE` permit statements without `WHERE`.
+- **Invalid input:** unsupported operators, invalid pagination, malformed bindings, and certain invalid statement shapes throw exceptions (typically `InvalidArgumentException`).
 
 ## Development
 
@@ -400,11 +801,11 @@ composer validate --strict
 composer test
 ```
 
-Tests run on PHP 8.4 in [GitHub Actions](https://github.com/wilycode/database-query/actions). Tests remain in Git, but are omitted from Composer distribution archives.
+The PHPUnit suite runs on PHP 8.4 in [GitHub Actions](https://github.com/wilycode/database-query/actions). Tests are tracked in Git but excluded from Composer distribution archives.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [issue tracker](https://github.com/wilycode/database-query/issues).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) or [open an issue](https://github.com/wilycode/database-query/issues).
 
 ## License
 
