@@ -113,7 +113,7 @@ $compiled = Query::select('users', 'u')
 // $compiled->params: [':param_1' => 15]
 ```
 
-Calling `compile()` again on an unchanged `SELECT` produces an equivalent query without duplicating its parameters. **Compilation does not contact the database.** To execute compiled queries, use a separate driver such as [`wilycode/database-driver-pdo`](https://github.com/wilycode/database-driver-pdo).
+Calling `compile()` again on an unchanged `SELECT` produces an equivalent query without duplicating its parameters. **Compilation does not contact the database.** To execute compiled queries, use a separate driver such as [`wilycode/database-pdo`](https://github.com/wilycode/database-pdo).
 
 ---
 
@@ -746,9 +746,9 @@ Database execution
 
 | Package | Purpose |
 | --- | --- |
-| [wilycode/database-driver](https://github.com/wilycode/database-driver) | Database connection and transaction contracts. |
-| [wilycode/database-driver-pdo](https://github.com/wilycode/database-driver-pdo) | PDO database implementation and query binder. |
-| [wilycode/database-driver-mysqli](https://github.com/wilycode/database-driver-mysqli) | MySQLi implementation and query binder. |
+| [wilycode/database](https://github.com/wilycode/database) | Database connection and transaction contracts. |
+| [wilycode/database-pdo](https://github.com/wilycode/database-pdo) | PDO database implementation and query binder. |
+| [wilycode/database-mysqli](https://github.com/wilycode/database-mysqli) | MySQLi implementation and query binder. |
 | [wilycode/database-model](https://github.com/wilycode/database-model) | Models and relationship hydration. |
 
 These libraries are **not required** to install or use the query builder itself. `compile()` does not run SQL, fetch records, or hydrate models.
