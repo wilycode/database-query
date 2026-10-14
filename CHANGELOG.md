@@ -2,6 +2,12 @@
 
 All notable changes to this package will be documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Updated related-package links and installation references to the renamed database packages.
+
 ## [0.1.0] - 2026-10-12
 
 ### Added
