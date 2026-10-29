@@ -63,7 +63,7 @@ final class HavingGroup
             : $logicalOperator;
 
         $this->list->addExpression(
-            $expression->compile($this->parameters),
+            $expression instanceof RawExpression ? $expression->compile($this->parameters) : $expression,
             $logical->value,
         );
 

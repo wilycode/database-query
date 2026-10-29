@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace WilyCode\Database\Query;
 
+use WilyCode\Database\Query\Dialect\DialectInterface;
+use WilyCode\Database\Query\Dialect\MySqlDialect;
 use WilyCode\Database\Query\Expression\RawExpression;
 use WilyCode\Database\Query\Statement\Delete;
 use WilyCode\Database\Query\Statement\Insert;
@@ -15,6 +17,17 @@ use WilyCode\Database\Query\Statement\Update;
 /** Static factory for query statements and raw expressions. */
 final class Query
 {
+    private static ?DialectInterface $defaultDialect = null;
+
+    /** Get the process default; pass null explicitly to reset it to MySQL. */
+    public static function dialectDefault(?DialectInterface $dialect = null): DialectInterface
+    {
+        if (func_num_args() > 0) {
+            self::$defaultDialect = $dialect;
+        }
+        return self::$defaultDialect ??= new MySqlDialect();
+    }
+
     public static function select(string $table = '', ?string $alias = null): Select
     {
         return new Select($table, $alias);

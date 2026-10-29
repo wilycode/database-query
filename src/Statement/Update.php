@@ -7,6 +7,9 @@ namespace WilyCode\Database\Query\Statement;
 use InvalidArgumentException;
 use WilyCode\Database\Query\Clause\WhereClause;
 use WilyCode\Database\Query\CompiledQuery;
+use WilyCode\Database\Query\Dialect\DialectInterface;
+use WilyCode\Database\Query\ParameterBag;
+use WilyCode\Database\Query\Query;
 
 final class Update extends WhereClause implements QueryInterface
 {
@@ -40,18 +43,19 @@ final class Update extends WhereClause implements QueryInterface
 
         return $this;
     }
-    public function compile(): CompiledQuery
+    public function compile(?DialectInterface $dialect = null): CompiledQuery
     {
-        $sql = $this->buildSql();
+        $bag = $this->parameters->withDialect($dialect ?? Query::dialectDefault());
+        $sql = $this->buildSql($bag);
 
         return new CompiledQuery(
             $sql,
-            $this->parameters->getParameters(),
-            $this->parameters->getTypes(),
+            $bag->getParameters(),
+            $bag->getTypes(),
         );
     }
 
-    private function buildSql(): string
+    private function buildSql(ParameterBag $bag): string
     {
         if (empty($this->table)) {
             throw new InvalidArgumentException('No table specified for UPDATE');
@@ -65,7 +69,7 @@ final class Update extends WhereClause implements QueryInterface
             'SET ' . implode(', ', array_values($this->set))
         ];
 
-        if ($where = $this->renderWheres()) {
+        if ($where = $this->renderWheres($bag)) {
             $parts[] = 'WHERE ' . $where;
         }
 

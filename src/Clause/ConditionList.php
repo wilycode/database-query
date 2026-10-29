@@ -4,37 +4,38 @@ declare(strict_types=1);
 
 namespace WilyCode\Database\Query\Clause;
 
+use WilyCode\Database\Query\Expression\Expression;
+use WilyCode\Database\Query\ParameterBag;
+
 final class ConditionList
 {
-    /** @var string[] */
+    /** @var list<array{string|Expression|self, string}> */
     private array $items = [];
 
-    public function addExpression(string $expression, string $logicalOperator): void
+    public function addExpression(string|Expression $expression, string $logicalOperator): void
     {
-        if ($this->items === []) {
-            $this->items[] = $expression;
-            return;
-        }
-
-        $this->items[] = $logicalOperator . ' ' . $expression;
+        $this->items[] = [$expression, $logicalOperator];
     }
 
     public function addGroup(self $group, string $logicalOperator): void
     {
-        $sql = $group->toSql();
-        if ($sql === null) {
-            return;
-        }
-
-        $this->addExpression('(' . $sql . ')', $logicalOperator);
+        $this->items[] = [$group, $logicalOperator];
     }
 
-    public function toSql(): ?string
+    public function toSql(?ParameterBag $bag = null): ?string
     {
-        if ($this->items === []) {
-            return null;
+        $bag ??= new ParameterBag();
+        $parts = [];
+        foreach ($this->items as [$item, $logical]) {
+            if ($item instanceof self) {
+                $sql = $item->toSql($bag);
+                if ($sql === null) { continue; }
+                $sql = '(' . $sql . ')';
+            } else {
+                $sql = $item instanceof Expression ? $item->compile($bag) : $item;
+            }
+            $parts[] = ($parts === [] ? '' : $logical . ' ') . $sql;
         }
-
-        return implode(' ', $this->items);
+        return $parts === [] ? null : implode(' ', $parts);
     }
 }

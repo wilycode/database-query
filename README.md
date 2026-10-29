@@ -12,6 +12,77 @@
 >
 > **[Explore all WilyCode libraries →](https://github.com/wilycode/wilycode)**
 
+## SQL dialects (0.2)
+
+Part of the **[WilyCode ecosystem](https://github.com/wilycode/wilycode)**.
+
+One package contains the builder and its dialects. MySQL is the standalone default.
+The same query can be compiled repeatedly for a different platform without changing
+its parameter state, including nested expressions, WHERE/HAVING groups and UNIONs.
+
+```php
+use WilyCode\Database\Query\Query;
+use WilyCode\Database\Query\Dialect\PostgreSqlDialect;
+use WilyCode\Database\Query\Dialect\SqliteDialect;
+
+$query = Query::select('users')->column('id', 'id')->orderBy('id')->limit(10);
+$mysql = $query->compile();
+$postgres = $query->compile(new PostgreSqlDialect());
+
+// Optional process-wide default for standalone compilation:
+Query::dialectDefault(new SqliteDialect());
+$current = Query::dialectDefault();
+Query::dialectDefault(null); // reset to MySQL
+
+$count = $query->forPaginationCount('total', new PostgreSqlDialect());
+```
+
+Prefer explicit dialects in workers serving multiple connections. The executor uses
+its own explicit choice or the actual connection platform; it never changes this
+process default. PDO is a transport, not a dialect: PDO/MySQL uses MySQL SQL,
+PDO/PostgreSQL uses PostgreSQL SQL, and PDO/SQLite uses SQLite SQL.
+
+| Dialect | Generated SQL | Requirements / limitations |
+| --- | --- | --- |
+| `MySqlDialect` | Backtick result aliases, `LIMIT/OFFSET`, `JSON_OBJECT/ARRAY/ARRAYAGG` | MySQL 8+ or MariaDB 10.5+ for JSON aggregation; DISTINCT aggregation rejected for this common dialect |
+| `PostgreSqlDialect` | Double-quoted result aliases, `LIMIT/OFFSET`, JSONB builders and aggregation | PostgreSQL with JSONB; JSON parameters receive explicit casts |
+| `SqliteDialect` | Double-quoted result aliases, SQLite UNION operands, JSON functions | SQLite 3.39+ with JSON enabled (including RIGHT JOIN support) |
+| SQL Server / Oracle | Extension points only | No built-in dialect or claim of driver compatibility yet |
+
+Only SQL owned by the builder is adapted. Table names, column strings, ORDER BY,
+GROUP BY and raw fragments retain the existing trusted-SQL contract. They are not
+user input and are not automatically quoted or translated. Use
+`$dialect->quoteIdentifier($name)` for a **single** identifier; quote each part of a
+qualified name separately. RawQuery and already CompiledQuery instances keep their
+SQL unchanged. Parameter binding remains the binder's responsibility.
+
+PostgreSQL raw JSON `?`, `?|`, `?&` operators are not accepted by the canonical
+placeholder format; use the corresponding functions (`jsonb_exists`, etc.).
+Dollar-quoted strings and `#>` / `#>>` operators are recognized by the scanner.
+Raw fragments must follow the scanner's documented common SQL subset; they are not
+a general-purpose SQL parser or cross-platform translation layer.
+
+JSON strings supplied as values remain SQL fragments; wrap literal strings in
+`ValueExpression::of()`. SQLite preserves boolean/float literal types and restores
+JSON typing around `JsonArraySubquery`. For ordinary scalar `Subquery` results used
+as JSON values, explicitly wrap the SQL in the engine's JSON conversion function.
+An aggregate source uses FROM/JOIN/WHERE and optionally GROUP BY/HAVING; its SELECT
+list, ordering and pagination are not applied. With grouping, the caller must
+ensure that a scalar aggregate subquery returns at most one row.
+
+### Migration from 0.1
+
+Custom `QueryInterface` implementations must accept
+`compile(?DialectInterface $dialect = null)`. The `Expression` signature is unchanged;
+custom expressions read the chosen dialect from `$bag->dialect()`. SQL expressions
+in WHERE/HAVING are evaluated at compilation time, so changes to a referenced
+subquery before compilation are visible. Raw conditions keep their existing binding
+behavior. MySQL offset-only queries now emit the required unlimited LIMIT, and
+unsupported MySQL `JSON_ARRAYAGG(DISTINCT ...)` throws instead of producing invalid SQL.
+
+See [dialect architecture and rollout](docs/dialects.md) for extension contracts,
+release ordering and integration coverage.
+
 ## Documentation
 
 This README is organized as a topic-by-topic guide, with **PHP examples followed by the SQL they compile to**. Use the links below to jump to a feature.

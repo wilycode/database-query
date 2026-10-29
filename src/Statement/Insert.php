@@ -6,7 +6,9 @@ namespace WilyCode\Database\Query\Statement;
 
 use InvalidArgumentException;
 use WilyCode\Database\Query\CompiledQuery;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\ParameterBag;
+use WilyCode\Database\Query\Query;
 
 final class Insert implements QueryInterface
 {
@@ -48,9 +50,9 @@ final class Insert implements QueryInterface
         $this->rows = $rows;
         return $this;
     }
-    public function compile(): CompiledQuery
+    public function compile(?DialectInterface $dialect = null): CompiledQuery
     {
-        $sql = $this->buildSql();
+        $sql = $this->buildSql($dialect ?? Query::dialectDefault());
 
         return new CompiledQuery(
             $sql,
@@ -59,7 +61,7 @@ final class Insert implements QueryInterface
         );
     }
 
-    private function buildSql(): string
+    private function buildSql(DialectInterface $dialect): string
     {
         if ($this->table === '') {
             throw new InvalidArgumentException('INSERT requires table');
@@ -85,18 +87,16 @@ final class Insert implements QueryInterface
             }
         }
 
-        $colSql = implode(', ', $columns);
-
         $valuesSqlParts = [];
         foreach ($this->rows as $row) {
             $placeholders = [];
             foreach ($columns as $col) {
                 $placeholders[] = $this->parameters->add($row[$col] ?? null);
             }
-            $valuesSqlParts[] = '(' . implode(', ', $placeholders) . ')';
+            $valuesSqlParts[] = $placeholders;
         }
 
-        return sprintf('INSERT INTO %s (%s) VALUES %s', $this->table, $colSql, implode(', ', $valuesSqlParts));
+        return $dialect->insert($this->table, $columns, $valuesSqlParts);
     }
 
 }

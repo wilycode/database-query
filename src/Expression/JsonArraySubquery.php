@@ -6,8 +6,8 @@ namespace WilyCode\Database\Query\Expression;
 
 use WilyCode\Database\Query\CompiledQuery;
 use WilyCode\Database\Query\ParameterBag;
-use WilyCode\Database\Query\Support\ParameterImporter;
 use WilyCode\Database\Query\Statement\Select;
+use WilyCode\Database\Query\Support\ParameterImporter;
 
 /**
  * Correlated JSON array subquery.
@@ -78,19 +78,12 @@ final class JsonArraySubquery implements Expression, ParameterPrefixAware
 
     public function compile(ParameterBag $bag): string
     {
-        $subBag = new ParameterBag();
+        $subBag = new ParameterBag($bag->dialect());
         $itemSql = $this->item instanceof Expression
-            ? $this->item->compile($subBag)
+            ? JsonValueCompiler::compileValue($this->item, $subBag)
             : $this->item;
 
-        $aggregate = 'JSON_ARRAYAGG('
-            . ($this->distinct ? 'DISTINCT ' : '')
-            . $itemSql
-            . ')';
-
-        if ($this->coalesceEmptyArray) {
-            $aggregate = 'COALESCE(' . $aggregate . ', JSON_ARRAY())';
-        }
+        $aggregate = $bag->dialect()->jsonAggregate($itemSql, $this->distinct, $this->coalesceEmptyArray);
 
         $body = $this->query->compileBody(
             $subBag,
@@ -104,6 +97,6 @@ final class JsonArraySubquery implements Expression, ParameterPrefixAware
             $subBag->getTypes(),
         );
 
-        return ParameterImporter::import($compiled, $bag, $this->resolveParamPrefix());
+        return $bag->dialect()->jsonResult(ParameterImporter::import($compiled, $bag, $this->resolveParamPrefix()));
     }
 }

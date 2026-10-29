@@ -29,6 +29,18 @@ final class SqlPlaceholderRewriter
         while ($offset < $length) {
             $character = $sql[$offset];
 
+            // PostgreSQL dollar-quoted strings contain no placeholders.
+            if ($character === '$' && preg_match('/\\G(\\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\\$)/', $sql, $match, 0, $offset) === 1) {
+                $delimiter = $match[1];
+                $end = strpos($sql, $delimiter, $offset + strlen($delimiter));
+                if ($end !== false) {
+                    $end += strlen($delimiter);
+                    $output .= substr($sql, $offset, $end - $offset);
+                    $offset = $end;
+                    continue;
+                }
+            }
+
             if ($character === "'") {
                 [$fragment, $offset] = self::readQuoted($sql, $offset, "'");
                 $output .= $fragment;
@@ -47,7 +59,7 @@ final class SqlPlaceholderRewriter
                 continue;
             }
 
-            if ($character === '#') {
+            if ($character === '#' && ($sql[$offset + 1] ?? '') !== '>') {
                 [$fragment, $offset] = self::readLineComment($sql, $offset);
                 $output .= $fragment;
                 continue;

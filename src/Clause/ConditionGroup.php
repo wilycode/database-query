@@ -75,7 +75,7 @@ final class ConditionGroup
             ? LogicalOperator::fromString($logicalOperator)
             : $logicalOperator;
 
-        $fragment = $expression->compile($this->parameters);
+        $fragment = $expression instanceof RawExpression ? $expression->compile($this->parameters) : $expression;
         $this->list->addExpression($fragment, $bool->value);
 
         return $this;

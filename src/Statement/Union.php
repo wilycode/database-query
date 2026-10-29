@@ -8,8 +8,10 @@ use InvalidArgumentException;
 use WilyCode\Database\Query\Clause\LimitOffset;
 use WilyCode\Database\Query\Clause\OrderByClause;
 use WilyCode\Database\Query\CompiledQuery;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\Enum\OrderDirection;
 use WilyCode\Database\Query\ParameterBag;
+use WilyCode\Database\Query\Query;
 use WilyCode\Database\Query\Support\ParameterImporter;
 
 final class Union implements QueryInterface
@@ -60,34 +62,32 @@ final class Union implements QueryInterface
         return $this;
     }
 
-    public function compile(): CompiledQuery
+    public function compile(?DialectInterface $dialect = null): CompiledQuery
     {
         if ($this->queries === []) {
             throw new InvalidArgumentException('UNION must contain at least one query.');
         }
 
-        $bag = new ParameterBag();
+        $dialect ??= Query::dialectDefault();
+        $bag = new ParameterBag($dialect);
         $parts = [];
 
         foreach ($this->queries as $index => $query) {
             $sql = ParameterImporter::import(
-                $query->compile(),
+                $query->compile($dialect),
                 $bag,
                 'union_' . ($index + 1),
             );
-            $parts[] = '(' . $sql . ')';
+            $parts[] = $dialect->unionOperand($sql);
         }
 
         $sql = implode(' UNION ', $parts);
         $orderBy = trim($this->orderBy->toSql());
-        $limitOffset = trim($this->limitOffset->toSql());
 
         if ($orderBy !== '') {
             $sql .= ' ' . $orderBy;
         }
-        if ($limitOffset !== '') {
-            $sql .= ' ' . $limitOffset;
-        }
+        $sql = $this->limitOffset->apply($sql, $dialect, $orderBy !== '');
 
         return new CompiledQuery($sql, $bag->getParameters(), $bag->getTypes());
     }
