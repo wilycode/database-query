@@ -14,9 +14,9 @@
 
 ## SQL dialects (0.2)
 
-Part of the **[WilyCode ecosystem](https://github.com/wilycode/wilycode)**.
+One package contains the builder and its dialects. With `QueryExecutor` and an updated PDO/MySQLi driver implementing `PlatformProviderInterface`, the dialect is detected from the connection automatically. **No `Query::dialectDefault(...)` call is required.** An explicit executor dialect overrides detection; an unknown platform fails instead of silently falling back to MySQL.
 
-One package contains the builder and its dialects. MySQL is the standalone default.
+MySQL is the default only for standalone compilation without an explicit dialect.
 The same query can be compiled repeatedly for a different platform without changing
 its parameter state, including nested expressions, WHERE/HAVING groups and UNIONs.
 
@@ -29,7 +29,8 @@ $query = Query::select('users')->column('id', 'id')->orderBy('id')->limit(10);
 $mysql = $query->compile();
 $postgres = $query->compile(new PostgreSqlDialect());
 
-// Optional process-wide default for standalone compilation:
+// Optional: only when changing the default for standalone compile() calls.
+// Not needed when executing builders through QueryExecutor:
 Query::dialectDefault(new SqliteDialect());
 $current = Query::dialectDefault();
 Query::dialectDefault(null); // reset to MySQL
@@ -103,11 +104,11 @@ This README is organized as a topic-by-topic guide, with **PHP examples followed
 - Fluent builders for `SELECT`, `INSERT`, `UPDATE`, `DELETE`, and `UNION`.
 - Table aliases and selected-column aliases, including columns selected from joins.
 - Conditions, nested `WHERE`/`HAVING` groups, grouping, sorting, and pagination.
-- Subqueries, raw expressions, and MySQL-oriented JSON object/array expressions.
+- Subqueries, raw expressions, and dialect-aware JSON object/array expressions.
 - Parameter binding with unique named placeholders and optional type metadata.
 - A driver-independent `CompiledQuery` result for separate PDO/MySQLi adapters.
 
-The package does **not** include a database connection, query execution, model hydration, schema migrations, automatic table prefixes, or a universal SQL-dialect compiler.
+The package does **not** include a database connection, query execution, model hydration, schema migrations, automatic table prefixes, or automatic translation of arbitrary raw SQL between database engines.
 
 ## Installation
 
@@ -163,11 +164,11 @@ LIMIT 10
 ```
 
 > [!NOTE]
-> SQL examples below are formatted for readability. `compile()` usually returns the SQL on a single line. Values stay separate from SQL; placeholders are not replaced with literal values.
+> Unless a dialect is named explicitly, SQL examples use the default MySQL dialect and are formatted for readability. `compile()` usually returns the SQL on a single line. Values stay separate from SQL; placeholders are not replaced with literal values.
 
 ## Compiling queries
 
-All statement builders expose `compile(): CompiledQuery`.
+All statement builders expose `compile(?DialectInterface $dialect = null): CompiledQuery`.
 
 | Property | Type | Description |
 | --- | --- | --- |
@@ -719,7 +720,7 @@ Other expression classes include:
 | `RawExpression::raw($sql, $params)` / `Query::rawExp(...)` | Arbitrary SQL fragment with bound values. |
 | `ValueExpression::of($value)` | A **bound literal** value. |
 | `Subquery` | Nested query expression. |
-| `JsonObject`, `JsonArray`, `JsonArraySubquery` | MySQL-oriented JSON structures. |
+| `JsonObject`, `JsonArray`, `JsonArraySubquery` | JSON structures compiled for the selected dialect. |
 
 The `Expression` interface exposes `compile(ParameterBag $bag): string` for advanced custom expressions.
 
@@ -727,7 +728,7 @@ The `Expression` interface exposes `compile(ParameterBag $bag): string` for adva
 
 ## JSON expressions
 
-MySQL-oriented JSON expressions are useful when your application needs a **structured value** rather than many flat columns from a JOIN.
+JSON expressions are useful when your application needs a **structured value** rather than many flat columns from a JOIN. The PHP expression API is shared by MySQL, PostgreSQL and SQLite; the selected dialect supplies the SQL functions, null guards and result-alias quoting. SQL Server and Oracle remain planned extensions.
 
 ### JSON objects (including optional LEFT JOIN relations)
 
@@ -793,19 +794,71 @@ SELECT p.id AS `id`,
 FROM posts AS p
 ```
 
-`JsonArraySubquery::of()` supports options for empty-array coalescing, `DISTINCT`, `GROUP BY`, and `HAVING` inclusion. It also supports `->paramPrefix('comments')` to namespace **bound parameter names**; if no prefix is set, `columnExp('comments', ...)` automatically uses the result alias as its prefix. This is *not* a table/column prefix.
+`JsonArraySubquery::of()` supports options for empty-array coalescing and `GROUP BY`/`HAVING` inclusion. The `distinct: true` option is supported by `PostgreSqlDialect` and `SqliteDialect`; `MySqlDialect` throws `LogicException` because MySQL's `JSON_ARRAYAGG` does not support `DISTINCT`. This restriction also applies when using the shared MySQL dialect with MariaDB. It also supports `->paramPrefix('comments')` to namespace **bound parameter names**; if no prefix is set, `columnExp('comments', ...)` automatically uses the result alias as its prefix. This is *not* a table/column prefix.
 
-Check generated JSON SQL against your MySQL/MariaDB version. This package does **not** provide separate dialect compilers for PostgreSQL, SQLite, SQL Server, or Oracle.
+### The same JSON query with different dialects
+
+The query above does not need to be rebuilt for another engine. When executing it
+through a platform-aware executor, pass the builder directly:
+
+```php
+// $executor is configured with the connection's driver and matching binder.
+$rows = $executor->fetchAll($query);
+```
+
+For standalone SQL inspection, choose the dialect explicitly:
+
+```php
+$postgres = $query->compile(new \WilyCode\Database\Query\Dialect\PostgreSqlDialect());
+$sqlite = $query->compile(new \WilyCode\Database\Query\Dialect\SqliteDialect());
+```
+
+| Expression | MySQL | PostgreSQL | SQLite |
+| --- | --- | --- | --- |
+| JSON object | `JSON_OBJECT(...)` | `JSONB_BUILD_OBJECT(...)` | `JSON_OBJECT(...)` |
+| JSON array | `JSON_ARRAY(...)` | `JSONB_BUILD_ARRAY(...)` | `JSON_ARRAY(...)` |
+| Array aggregation | `JSON_ARRAYAGG(...)` | `JSONB_AGG(...)` | `JSON_GROUP_ARRAY(...)` |
+| Null guard | `IF(...)` | `CASE WHEN ... END` | `CASE WHEN ... END` |
+| Distinct aggregation | Rejected by this dialect | Supported | Supported |
+
+**PostgreSQL compiled SQL for the query above**
+
+```sql
+SELECT p.id AS "id",
+       (SELECT COALESCE(
+           JSONB_AGG(JSONB_BUILD_OBJECT('id', c.id, 'body', c.body)),
+           '[]'::jsonb
+       ) FROM comments AS c
+       WHERE c.post_id = p.id AND c.approved = :comments_param_1)
+       AS "comments"
+FROM posts AS p
+```
+
+**SQLite compiled SQL for the same query**
+
+```sql
+SELECT p.id AS "id",
+       JSON((SELECT JSON_GROUP_ARRAY(JSON_OBJECT('id', c.id, 'body', c.body))
+             FROM comments AS c
+             WHERE c.post_id = p.id AND c.approved = :comments_param_1))
+       AS "comments"
+FROM posts AS p
+```
+
+SQLite's outer `JSON(...)` restores JSON typing across the subquery boundary.
+By default, an aggregate over no matching rows produces an empty array.
+With `coalesceEmptyArray: false`, the expression returns SQL `NULL` instead.
+See [SQL dialects](#sql-dialects-02) for engine requirements and raw-SQL limitations.
 
 ---
 
 ## Driver integration
 
-WilyCode Database Query creates a **driver-neutral intermediate query**, while separate packages handle connections and execution.
+WilyCode Database Query creates a **driver-neutral query container with dialect-specific SQL**, while separate packages handle connections and execution.
 
 ```text
 Query builder
-    ↓ compile()
+    ↓ compile(dialect selected by executor or caller)
 CompiledQuery { sql, params, types }
     ↓ driver-specific BinderInterface::bind()
 BoundQuery { sql, params, types }
@@ -820,6 +873,7 @@ Database execution
 | [wilycode/database](https://github.com/wilycode/database) | Database connection and transaction contracts. |
 | [wilycode/database-pdo](https://github.com/wilycode/database-pdo) | PDO database implementation and query binder. |
 | [wilycode/database-mysqli](https://github.com/wilycode/database-mysqli) | MySQLi implementation and query binder. |
+| [wilycode/database-query-executor](https://github.com/wilycode/database-query-executor) | Detect the connection dialect, compile builders, bind values and execute queries. |
 | [wilycode/database-model](https://github.com/wilycode/database-model) | Models and relationship hydration. |
 
 These libraries are **not required** to install or use the query builder itself. `compile()` does not run SQL, fetch records, or hydrate models.
@@ -855,7 +909,7 @@ Supported enum families: `ComparisonOperator`, `LogicalOperator`, `OrderDirectio
 ## Security and limitations
 
 - **Trusted identifiers only.** Parameter binding protects values, **not** SQL identifiers or arbitrary fragments.
-- **SQL dialect:** identifiers, JSON functions, and some compiled fragments use MySQL-oriented conventions. Test SQL on your actual database engine.
+- **SQL dialect:** MySQL, PostgreSQL and SQLite have built-in dialects. SQL Server and Oracle are not implemented yet. Raw fragments and identifier strings remain application-supplied SQL; they are not translated automatically.
 - **No execution:** there is no connection, fetch, logging, or ORM layer in this package.
 - **No automatic table prefix:** supply physical table names directly (e.g. `app_posts`).
 - **No automatic JOIN result prefix:** select explicit aliases such as `['categoryName' => 'name']`.
