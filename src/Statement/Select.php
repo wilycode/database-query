@@ -10,12 +10,14 @@ use WilyCode\Database\Query\Clause\GroupByClause;
 use WilyCode\Database\Query\Clause\LimitOffset;
 use WilyCode\Database\Query\Clause\OrderByClause;
 use WilyCode\Database\Query\CompiledQuery;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\Enum\JoinType;
 use WilyCode\Database\Query\Enum\OrderDirection;
 use WilyCode\Database\Query\Expression\Expression;
 use WilyCode\Database\Query\Expression\ParameterPrefixAware;
 use WilyCode\Database\Query\Expression\RawExpression;
 use WilyCode\Database\Query\ParameterBag;
+use WilyCode\Database\Query\Query;
 use WilyCode\Database\Query\Support\ParameterImporter;
 
 final class Select extends ConditionClause implements QueryInterface
@@ -29,7 +31,7 @@ final class Select extends ConditionClause implements QueryInterface
     private array $selectItems = [];
 
     /**
-     * @var array<int, array{type: JoinType, table: string, alias: string, on: \WilyCode\Database\Query\Expression\Expression}>
+     * @var array<int, array{type: JoinType, table: string, alias: string, on: Expression}>
      */
     private array $joins = [];
 
@@ -190,9 +192,9 @@ final class Select extends ConditionClause implements QueryInterface
     /**
      * Compile the query without mutating its internal parameter state.
      */
-    public function compile(): CompiledQuery
+    public function compile(?DialectInterface $dialect = null): CompiledQuery
     {
-        $bag = clone $this->parameters;
+        $bag = $this->parameters->withDialect($dialect ?? Query::dialectDefault());
         $sql = $this->buildSql($bag);
 
         return new CompiledQuery($sql, $bag->getParameters(), $bag->getTypes());
@@ -204,7 +206,7 @@ final class Select extends ConditionClause implements QueryInterface
         bool $includeGroupBy = false,
         bool $includeHaving = false,
     ): string {
-        $source = clone $this->parameters;
+        $source = $this->parameters->withDialect($target->dialect());
         $sql = $this->buildBodySql($source, $includeGroupBy, $includeHaving);
 
         return ParameterImporter::importSql($sql, $source, $target);
@@ -213,26 +215,25 @@ final class Select extends ConditionClause implements QueryInterface
     private function buildSql(ParameterBag $bag): string
     {
         $select = $this->buildSelectItems($bag);
-        $from = $this->buildFrom();
+        $from = $this->buildFrom($bag);
         $joins = $this->buildJoins($bag);
-        $where = $this->buildWhere();
+        $where = $this->buildWhere($bag);
         $groupBy = $this->buildGroupBy();
-        $having = $this->buildHaving();
+        $having = $this->buildHaving($bag);
         $orderBy = $this->buildOrderBy();
-        $limitOffset = trim($this->limitOffset->toSql());
 
-        $parts = array_filter([$select, $from, $joins, $where, $groupBy, $having, $orderBy, $limitOffset], static fn($p) => $p !== '');
-        return implode(' ', $parts);
+        $parts = array_filter([$select, $from, $joins, $where, $groupBy, $having, $orderBy], static fn($p) => $p !== '');
+        return $this->limitOffset->apply(implode(' ', $parts), $bag->dialect(), $orderBy !== '');
     }
 
     private function buildBodySql(ParameterBag $bag, bool $includeGroupBy, bool $includeHaving): string
     {
         // Ensure JOIN parameters are mapped into this query's bag.
-        $from = $this->buildFrom();
+        $from = $this->buildFrom($bag);
         $joins = $this->buildJoins($bag);
-        $where = $this->buildWhere();
+        $where = $this->buildWhere($bag);
         $groupBy = $includeGroupBy ? $this->buildGroupBy() : '';
-        $having = $includeHaving ? $this->buildHaving() : '';
+        $having = $includeHaving ? $this->buildHaving($bag) : '';
 
         $parts = array_filter([$from, $joins, $where, $groupBy, $having], static fn($p) => $p !== '');
         return implode(' ', $parts);
@@ -265,7 +266,7 @@ final class Select extends ConditionClause implements QueryInterface
             }
 
             if ($alias !== null && $alias !== '') {
-                $items[] = $sql . ' AS `' . str_replace('`', '``', $alias) . '`';
+                $items[] = $sql . ' AS ' . $bag->dialect()->quoteIdentifier($alias);
             } else {
                 $items[] = $sql;
             }
@@ -274,7 +275,7 @@ final class Select extends ConditionClause implements QueryInterface
         return 'SELECT ' . implode(', ', $items);
     }
 
-    private function buildFrom(): string
+    private function buildFrom(ParameterBag $bag): string
     {
         if ($this->table === '') {
             return '';
@@ -283,7 +284,7 @@ final class Select extends ConditionClause implements QueryInterface
         $alias = $this->alias;
         $hasAlias = $alias !== null && $alias !== '';
 
-        return 'FROM ' . $this->table . ($hasAlias ? ' AS ' . $alias : '');
+        return 'FROM ' . ($hasAlias ? $bag->dialect()->tableAlias($this->table, $alias) : $this->table);
     }
 
 
@@ -299,10 +300,9 @@ final class Select extends ConditionClause implements QueryInterface
             $onSql = $join['on']->compile($bag);
 
             $joins[] = sprintf(
-                '%s %s AS %s ON %s',
+                '%s %s ON %s',
                 $type,
-                $join['table'],
-                $join['alias'],
+                $bag->dialect()->tableAlias($join['table'], $join['alias']),
                 $onSql
             );
         }
@@ -310,9 +310,9 @@ final class Select extends ConditionClause implements QueryInterface
         return implode(' ', $joins);
     }
 
-    private function buildWhere(): string
+    private function buildWhere(ParameterBag $bag): string
     {
-        $whereSql = $this->renderWheres();
+        $whereSql = $this->renderWheres($bag);
         if ($whereSql === null) {
             return '';
         }
@@ -339,7 +339,7 @@ final class Select extends ConditionClause implements QueryInterface
      *
      * IMPORTANT: Uses a clone with a fresh ParameterBag to avoid parameter duplication.
      */
-    public function forPaginationCount(string $countAlias = 'total'): CompiledQuery
+    public function forPaginationCount(string $countAlias = 'total', ?DialectInterface $dialect = null): CompiledQuery
     {
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $countAlias) !== 1) {
             throw new InvalidArgumentException(sprintf(
@@ -353,8 +353,9 @@ final class Select extends ConditionClause implements QueryInterface
         $q->orderBy = new OrderByClause();
         $q->limitOffset = new LimitOffset();
 
-        $inner = $q->compile();
-        $sql = 'SELECT COUNT(*) AS ' . $countAlias . ' FROM (' . $inner->sql . ') AS _count';
+        $dialect ??= Query::dialectDefault();
+        $inner = $q->compile($dialect);
+        $sql = 'SELECT COUNT(*) AS ' . $countAlias . ' FROM ' . $dialect->tableAlias('(' . $inner->sql . ')', '_count');
 
         return new CompiledQuery($sql, $inner->params, $inner->types);
     }

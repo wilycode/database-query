@@ -9,6 +9,34 @@ jobs:
     name: PHP 8.4 · PHPUnit
     runs-on: ubuntu-latest
 
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_test
+          MYSQL_DATABASE: wily_test
+          MYSQL_USER: wily_test
+          MYSQL_PASSWORD: wily_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot_test"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wily_test
+          POSTGRES_USER: wily_test
+          POSTGRES_PASSWORD: wily_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U wily_test"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      WILY_TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=wily_test;charset=utf8mb4
+      WILY_TEST_PGSQL_DSN: pgsql:host=127.0.0.1;port=5432;dbname=wily_test
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,7 +45,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: ctype, dom, mbstring, xml, xmlwriter
+          extensions: ctype, dom, mbstring, xml, xmlwriter, pdo_sqlite, pdo_mysql, pdo_pgsql
           coverage: none
           tools: composer:v2
 

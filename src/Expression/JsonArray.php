@@ -43,6 +43,6 @@ final class JsonArray implements Expression
             $compiled[] = JsonValueCompiler::compileValue($item, $bag);
         }
 
-        return 'JSON_ARRAY(' . implode(', ', $compiled) . ')';
+        return $bag->dialect()->jsonArray($compiled);
     }
 }

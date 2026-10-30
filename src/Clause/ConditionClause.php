@@ -8,6 +8,7 @@ use WilyCode\Database\Query\Enum\ComparisonOperator;
 use WilyCode\Database\Query\Enum\LogicalOperator;
 use WilyCode\Database\Query\Expression\Expression;
 use WilyCode\Database\Query\Expression\RawExpression;
+use WilyCode\Database\Query\ParameterBag;
 
 /**
  * Adds HAVING support on top of WHERE (used by SELECT statements).
@@ -97,14 +98,14 @@ abstract class ConditionClause extends WhereClause
         return $this->havingGroup($callback, LogicalOperator::OR);
     }
 
-    protected function renderHavings(): ?string
+    protected function renderHavings(ParameterBag $bag): ?string
     {
-        return $this->havingList->toSql();
+        return $this->havingList->toSql($bag);
     }
 
-    protected function buildHaving(): string
+    protected function buildHaving(ParameterBag $bag): string
     {
-        $h = $this->renderHavings();
+        $h = $this->renderHavings($bag);
         return $h ? 'HAVING ' . $h : '';
     }
 }

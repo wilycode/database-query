@@ -14,7 +14,7 @@ final class Subquery implements Expression
 
     public function compile(ParameterBag $bag): string
     {
-        $sql = ParameterImporter::import($this->query->compile(), $bag);
+        $sql = ParameterImporter::import($this->query->compile($bag->dialect()), $bag);
 
         return '(' . $sql . ')';
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WilyCode\Database\Query\Statement;
 
 use WilyCode\Database\Query\CompiledQuery;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\ParameterBag;
 use WilyCode\Database\Query\ParameterProcessor;
 
@@ -20,7 +21,7 @@ final class RawQuery implements QueryInterface
         $this->sql = ParameterProcessor::process($sql, $parameters, $this->parameters);
     }
 
-    public function compile(): CompiledQuery
+    public function compile(?DialectInterface $dialect = null): CompiledQuery
     {
         return new CompiledQuery(
             $this->sql,

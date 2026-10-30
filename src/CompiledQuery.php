@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WilyCode\Database\Query;
 
 use InvalidArgumentException;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\Enum\ParameterType;
 use WilyCode\Database\Query\Statement\QueryInterface;
 use WilyCode\Database\Query\Support\SqlPlaceholderRewriter;
@@ -97,7 +98,7 @@ final readonly class CompiledQuery implements QueryInterface
         $this->types = $orderedTypes;
     }
 
-    public function compile(): self
+    public function compile(?DialectInterface $dialect = null): self
     {
         return $this;
     }

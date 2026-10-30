@@ -112,9 +112,9 @@ abstract class WhereClause
         return $this->whereGroup($callback, LogicalOperator::OR);
     }
 
-    protected function renderWheres(): ?string
+    protected function renderWheres(ParameterBag $bag): ?string
     {
-        return $this->whereList->toSql();
+        return $this->whereList->toSql($bag);
     }
 
 }

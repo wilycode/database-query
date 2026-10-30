@@ -7,6 +7,7 @@ namespace WilyCode\Database\Query;
 use BackedEnum;
 use DateTimeInterface;
 use InvalidArgumentException;
+use WilyCode\Database\Query\Dialect\DialectInterface;
 use WilyCode\Database\Query\Enum\ParameterType;
 
 final class ParameterBag
@@ -18,6 +19,20 @@ final class ParameterBag
     private array $namedTypes  = [];
 
     private int $counter = 0;
+
+    public function __construct(private ?DialectInterface $dialect = null) {}
+
+    public function dialect(): DialectInterface
+    {
+        return $this->dialect ?? Query::dialectDefault();
+    }
+
+    public function withDialect(DialectInterface $dialect): self
+    {
+        $copy = clone $this;
+        $copy->dialect = $dialect;
+        return $copy;
+    }
 
     public function add(mixed $value, ?string $name = null, ?ParameterType $type = null): string
     {

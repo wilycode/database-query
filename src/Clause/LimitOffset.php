@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace WilyCode\Database\Query\Clause;
 
 use InvalidArgumentException;
+use WilyCode\Database\Query\Dialect\DialectInterface;
+use WilyCode\Database\Query\Query;
 
 final class LimitOffset
 {
@@ -43,16 +45,13 @@ final class LimitOffset
         return $this->limit($perPage)->offset(($page - 1) * $perPage);
     }
 
+    public function apply(string $sql, DialectInterface $dialect, bool $hasOrderBy): string
+    {
+        return $dialect->paginate($sql, $this->limit, $this->offset, $hasOrderBy);
+    }
+
     public function toSql(): string
     {
-        $parts = [];
-        if ($this->limit !== null) {
-            $parts[] = 'LIMIT ' . $this->limit;
-        }
-        if ($this->offset !== null) {
-            $parts[] = 'OFFSET ' . $this->offset;
-        }
-
-        return implode(' ', $parts);
+        return ltrim($this->apply('', Query::dialectDefault(), false));
     }
 }

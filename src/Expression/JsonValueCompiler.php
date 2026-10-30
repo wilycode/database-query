@@ -26,6 +26,9 @@ final class JsonValueCompiler
      */
     public static function compileValue(mixed $value, ParameterBag $bag): string
     {
+        if ($value instanceof ValueExpression) {
+            return $value->compileJson($bag);
+        }
         if ($value instanceof Expression) {
             return $value->compile($bag);
         }
@@ -40,7 +43,7 @@ final class JsonValueCompiler
         }
 
         if (is_int($value) || is_bool($value) || is_float($value)) {
-            return $bag->add($value);
+            return ValueExpression::of($value)->compileJson($bag);
         }
 
         if (is_array($value)) {

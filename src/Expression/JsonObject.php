@@ -42,9 +42,9 @@ final class JsonObject implements Expression
     public function compile(ParameterBag $bag): string
     {
         if (empty($this->fields)) {
-            // MySQL requires at least one key/value; fallback to empty object literal.
-            $obj = 'JSON_OBJECT()';
-            return $this->nullGuardColumn ? $this->wrapNullGuard($obj) : $obj;
+            // All supported dialects can construct an empty object.
+            $obj = $bag->dialect()->jsonObject([]);
+            return $this->nullGuardColumn ? $bag->dialect()->nullGuard($this->nullGuardColumn, $obj) : $obj;
         }
 
         $parts = [];
@@ -53,17 +53,17 @@ final class JsonObject implements Expression
                 throw new InvalidArgumentException('JsonObject field keys must be non-empty strings.');
             }
 
-            $safeKey = str_replace("'", "''", $key);
-            $parts[] = "'{$safeKey}'";
+            // Simple keys are safe literals; other keys are bound so backslashes,
+            // quotes and connection string-literal modes cannot change their meaning.
+            $key = (string) $key;
+            $parts[] = preg_match('/^[a-zA-Z0-9_]+$/D', $key) === 1
+                ? "'" . $key . "'"
+                : ValueExpression::of($key)->compileJson($bag);
             $parts[] = JsonValueCompiler::compileValue($value, $bag);
         }
 
-        $obj = 'JSON_OBJECT(' . implode(', ', $parts) . ')';
-        return $this->nullGuardColumn ? $this->wrapNullGuard($obj) : $obj;
+        $obj = $bag->dialect()->jsonObject($parts);
+        return $this->nullGuardColumn ? $bag->dialect()->nullGuard($this->nullGuardColumn, $obj) : $obj;
     }
 
-    private function wrapNullGuard(string $jsonObjectSql): string
-    {
-        return 'IF(' . $this->nullGuardColumn . ' IS NULL, NULL, ' . $jsonObjectSql . ')';
-    }
 }

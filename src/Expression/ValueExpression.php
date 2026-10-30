@@ -21,6 +21,12 @@ final class ValueExpression implements Expression
         return new self($value);
     }
 
+    public function compileJson(ParameterBag $bag): string
+    {
+        $placeholder = $this->compile($bag);
+        return $bag->dialect()->jsonParameter($placeholder, $bag->getTypes()[$placeholder]);
+    }
+
     public function compile(ParameterBag $bag): string
     {
         return $bag->add($this->value);
