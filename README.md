@@ -25,7 +25,7 @@ use WilyCode\Database\Query\Query;
 use WilyCode\Database\Query\Dialect\PostgreSqlDialect;
 use WilyCode\Database\Query\Dialect\SqliteDialect;
 
-$query = Query::select('users')->column('id', 'id')->orderBy('id')->limit(10);
+$query = Query::select('users')->columns(['id', 'name'])->orderBy('id')->limit(10);
 $mysql = $query->compile();
 $postgres = $query->compile(new PostgreSqlDialect());
 
@@ -136,7 +136,7 @@ Build a query, apply conditions and sorting, then call `compile()`:
 use WilyCode\Database\Query\Query;
 
 $query = Query::select('users', 'u')
-    ->columns(['id' => 'id', 'email' => 'email'])
+    ->columns(['id', 'email'])
     ->where('u.active', true)
     ->orderBy('u.id', 'DESC')
     ->limit(10);
@@ -150,7 +150,7 @@ print_r($compiled->params);
 **Compiled SQL**
 
 ```sql
-SELECT u.id AS `id`, u.email AS `email`
+SELECT u.id, u.email
 FROM users AS u
 WHERE u.active = :param_1
 ORDER BY u.id DESC
@@ -197,16 +197,13 @@ Calling `compile()` again on an unchanged `SELECT` produces an equivalent query 
 
 ```php
 $query = Query::select('posts', 'p')
-    ->columns([
-        'postId' => 'id',
-        'title' => 'title',
-    ]);
+    ->columns(['id', 'title']);
 ```
 
 **Compiled SQL**
 
 ```sql
-SELECT p.id AS `postId`, p.title AS `title`
+SELECT p.id, p.title
 FROM posts AS p
 ```
 
@@ -217,7 +214,7 @@ If no columns are supplied, the builder uses `SELECT *`.
 | Method | Example | Behavior |
 | --- | --- | --- |
 | `column($name, $alias = null)` | `->column('p.id', 'postId')` | Select one column with an optional result alias. |
-| `columns($columns)` | `->columns(['id' => 'id', 'title' => 'title'])` | Select several columns. Array **keys** are result aliases. |
+| `columns($columns)` | `->columns(['id', 'title'])` | Select several columns. List entries have no result alias; associative keys define aliases. |
 | `columnRaw($alias, $sql, $params = [])` | `->columnRaw('length', 'CHAR_LENGTH(p.title)')` | Add a raw SQL expression with an alias. |
 | `columnExp($alias, $expression)` | `->columnExp('profile', JsonObject::of(...))` | Select a typed expression. |
 
@@ -225,7 +222,7 @@ If no columns are supplied, the builder uses `SELECT *`.
 $query = Query::select('posts', 'p')
     ->columns([
         'postId' => 'id',
-        'title' => 'title',
+        'title',
         'p.created_at', // numeric key: select without AS
     ])
     ->columnRaw('titleLength', 'CHAR_LENGTH(p.title)');
@@ -234,7 +231,7 @@ $query = Query::select('posts', 'p')
 **Compiled SQL**
 
 ```sql
-SELECT p.id AS `postId`, p.title AS `title`, p.created_at,
+SELECT p.id AS `postId`, p.title, p.created_at,
        CHAR_LENGTH(p.title) AS `titleLength`
 FROM posts AS p
 ```
@@ -265,7 +262,7 @@ The **fifth argument** is important: it selects extra columns from the joined ta
 
 ```php
 $query = Query::select('posts', 'p')
-    ->columns(['postId' => 'id', 'title' => 'title'])
+    ->columns(['postId' => 'id', 'title'])
     ->leftJoin(
         'users',
         'u',
@@ -285,7 +282,7 @@ $query = Query::select('posts', 'p')
 **Compiled SQL**
 
 ```sql
-SELECT p.id AS `postId`, p.title AS `title`,
+SELECT p.id AS `postId`, p.title,
        u.name AS `authorName`, c.name AS `categoryName`
 FROM posts AS p
 LEFT JOIN users AS u ON u.id = p.user_id
